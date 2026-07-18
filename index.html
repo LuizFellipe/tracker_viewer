@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tracker &amp; Wi-Fi Survey Visualizer</title>
+    <meta name="description" content="Visualizador interativo de logs GPS e monitor de redes Wi-Fi com OpenStreetMap e gráficos em tempo real.">
+    
+    <!-- CSS Dependencies -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <link rel="stylesheet" href="style.css">
+    
+    <!-- JS Dependencies -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+    <!-- Header Section -->
+    <header>
+        <div class="logo-section">
+            <h1>📡 Tracker Dashboard</h1>
+        </div>
+        <nav class="tab-nav">
+            <button class="tab-btn active" data-tab="tab-log">Tracker Log</button>
+            <button class="tab-btn" data-tab="tab-wifi">Wi-Fi Survey</button>
+        </nav>
+        <div style="display: flex; gap: 1rem; align-items: center;">
+            <div id="status-indicator" class="status-indicator">
+                <span id="status-dot" class="dot"></span>
+                <span id="status-text">Sem dados carregados</span>
+            </div>
+            <button id="btn-load-local" class="btn btn-primary">Carregar Arquivos do Workspace</button>
+        </div>
+    </header>
+
+    <!-- Loading Progress Bar -->
+    <div id="loading-progress-wrap" class="loading-progress-wrap" style="display:none;">
+        <div id="loading-progress-bar" class="loading-progress-bar"></div>
+        <span id="loading-progress-label" class="loading-progress-label">0%</span>
+    </div>
+
+    <!-- Main Container -->
+    <main>
+        
+        <!-- Tab 1: Tracker Log Visualizer -->
+        <section id="tab-log" class="tab-content active">
+            <div class="control-panel">
+                <div class="panel-title">Carregar logs do rastreador (log.txt)</div>
+                <div class="action-buttons">
+                    <span class="file-input-wrapper btn">
+                        <span>Selecionar Arquivo Log</span>
+                        <input type="file" id="input-log-file" accept=".txt,.csv" />
+                    </span>
+                </div>
+            </div>
+
+            <!-- Stats Overview -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <span class="stat-label">Pontos Registrados</span>
+                    <span id="log-stat-points" class="stat-value">0</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">Velocidade Máxima</span>
+                    <span id="log-stat-max-speed" class="stat-value">0 <span class="stat-unit">km/h</span></span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">Temp Média DHT</span>
+                    <span id="log-stat-temp" class="stat-value">0 <span class="stat-unit">°C</span></span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">Umidade Média DHT</span>
+                    <span id="log-stat-hum" class="stat-value">0 <span class="stat-unit">%</span></span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">Eventos de Trepidação</span>
+                    <span id="log-stat-bumps" class="stat-value">0</span>
+                </div>
+            </div>
+
+            <!-- Visualizer Grid: Map + Comfort Heatbar -->
+            <div class="viz-grid">
+                <!-- Map Card -->
+                <div class="card">
+                    <div class="card-title">
+                        Mapa de Rota (GPS)
+                        <div class="map-legend" id="map-legend">
+                            <span class="legend-dot" style="background:#10b981;"></span><span>Normal</span>
+                            <span class="legend-dot" style="background:#f59e0b;"></span><span>Solavanco</span>
+                            <span class="legend-dot" style="background:#ef4444;"></span><span>Impacto</span>
+                            <span class="legend-dot" style="background:#a855f7;"></span><span>Curva</span>
+                        </div>
+                    </div>
+                    <div id="map-log" class="map-container"></div>
+                </div>
+
+                <!-- Thermal Comfort Card -->
+                <div class="card">
+                    <div class="card-title">Conforto Térmico (Heat Index)</div>
+                    <div class="comfort-legend">
+                        <span class="comfort-badge" style="background:rgba(96,165,250,0.2);color:#60a5fa;">Fresco</span>
+                        <span class="comfort-badge" style="background:rgba(16,185,129,0.2);color:#34d399;">Confortável</span>
+                        <span class="comfort-badge" style="background:rgba(245,158,11,0.2);color:#fbbf24;">Quente</span>
+                        <span class="comfort-badge" style="background:rgba(239,68,68,0.2);color:#f87171;">Crítico</span>
+                    </div>
+                    <div class="heatbar-wrap">
+                        <canvas id="chart-heatbar" class="heatbar-canvas"></canvas>
+                        <div id="heatbar-labels" class="heatbar-labels"></div>
+                    </div>
+                    <div class="chart-wrapper" style="height:160px; margin-top:1rem;">
+                        <canvas id="chart-temp"></canvas>
+                    </div>
+                    <div class="chart-wrapper" style="height:160px;">
+                        <canvas id="chart-hum"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Charts Section -->
+            <div class="charts-section">
+                <!-- Speed Chart Card -->
+                <div class="card">
+                    <div class="card-title">Velocidade e Satélites</div>
+                    <div class="chart-wrapper">
+                        <canvas id="chart-speed"></canvas>
+                    </div>
+                </div>
+
+                <!-- Jerk Chart Card -->
+                <div class="card">
+                    <div class="card-title">Jerk Vertical (Trepidação)</div>
+                    <div class="chart-wrapper">
+                        <canvas id="chart-jerk"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- IMU Analysis Panel (collapsible) -->
+            <div class="card imu-panel-card">
+                <div class="card-title">
+                    <span>📊 Análise de Trepidação — Eventos Detectados</span>
+                    <button id="btn-imu-toggle" class="btn btn-toggle" aria-expanded="false">Expandir ▾</button>
+                </div>
+                <div id="imu-panel" class="imu-panel collapsed">
+                    <div class="imu-panel-inner">
+                        <div class="imu-summary" id="imu-summary">
+                            <div class="imu-stat">
+                                <span class="imu-stat-label">Solav. Leve</span>
+                                <span id="imu-count-leve" class="imu-stat-value" style="color:#f59e0b;">0</span>
+                            </div>
+                            <div class="imu-stat">
+                                <span class="imu-stat-label">Impacto Forte</span>
+                                <span id="imu-count-forte" class="imu-stat-value" style="color:#ef4444;">0</span>
+                            </div>
+                            <div class="imu-stat">
+                                <span class="imu-stat-label">Curvas Bruscas</span>
+                                <span id="imu-count-curva" class="imu-stat-value" style="color:#a855f7;">0</span>
+                            </div>
+                            <div class="imu-stat">
+                                <span class="imu-stat-label">Threshold Leve</span>
+                                <span id="imu-thresh-leve" class="imu-stat-value">—</span>
+                            </div>
+                            <div class="imu-stat">
+                                <span class="imu-stat-label">Threshold Forte</span>
+                                <span id="imu-thresh-forte" class="imu-stat-value">—</span>
+                            </div>
+                        </div>
+
+                        <div id="event-list-wrap">
+                            <div style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:0.5rem; font-weight:600; text-transform:uppercase; letter-spacing:0.05em;">Lista de Eventos</div>
+                            <div id="event-list" class="list-panel" style="max-height:300px;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Tab 2: Wi-Fi Survey -->
+        <section id="tab-wifi" class="tab-content">
+            <div class="control-panel">
+                <div class="panel-title">Carregar Wi-Fi survey (wifi.txt)</div>
+                <div class="action-buttons">
+                    <span class="file-input-wrapper btn">
+                        <span>Selecionar Arquivo Wi-Fi</span>
+                        <input type="file" id="input-wifi-file" accept=".txt,.csv" />
+                    </span>
+                </div>
+            </div>
+
+            <!-- Stats Overview -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <span class="stat-label">Pontos Escaneados</span>
+                    <span id="wifi-stat-scans" class="stat-value">0</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">SSIDs Únicos</span>
+                    <span id="wifi-stat-unique" class="stat-value">0</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">Melhor Sinal</span>
+                    <span id="wifi-stat-best-signal" class="stat-value">0 <span class="stat-unit">dBm</span></span>
+                </div>
+            </div>
+
+            <!-- Visualizer Grid -->
+            <div class="viz-grid">
+                <!-- Map Card -->
+                <div class="card">
+                    <div class="card-title">Mapa de Sinais Wi-Fi</div>
+                    <div id="map-wifi" class="map-container"></div>
+                </div>
+
+                <!-- Wi-Fi Search and List Card -->
+                <div class="card">
+                    <div class="card-title">Lista de Redes Encontradas</div>
+                    
+                    <div class="search-filter-row">
+                        <input type="text" id="wifi-search" class="input-control" placeholder="Buscar por SSID ou Segurança..." style="flex: 1; min-width: 180px;">
+                        
+                        <select id="wifi-filter-channel" class="input-control">
+                            <option value="all">Todos os Canais</option>
+                        </select>
+                    </div>
+
+                    <div style="display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.5rem;">
+                        <div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: var(--text-secondary);">
+                            <span>Sinal Mínimo</span>
+                            <span id="wifi-signal-val">-100 dBm</span>
+                        </div>
+                        <input type="range" id="wifi-filter-signal" min="-100" max="-30" value="-100" class="slider" style="width: 100%;">
+                    </div>
+
+                    <div id="wifi-list" class="list-panel">
+                        <div style="padding: 1.5rem; text-align: center; color: var(--text-secondary);">Sem dados carregados</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Analytics Charts -->
+            <div class="charts-section">
+                <!-- Channel usage Chart Card -->
+                <div class="card">
+                    <div class="card-title">Uso de Canais Wi-Fi</div>
+                    <div class="chart-wrapper">
+                        <canvas id="chart-wifi-channels"></canvas>
+                    </div>
+                </div>
+
+                <!-- Security distribution Chart Card -->
+                <div class="card">
+                    <div class="card-title">Protocolos de Segurança</div>
+                    <div class="chart-wrapper">
+                        <canvas id="chart-wifi-security"></canvas>
+                    </div>
+                </div>
+            </div>
+        </section>
+        
+    </main>
+
+    <!-- App Scripts -->
+    <script src="app.js"></script>
+</body>
+</html>
