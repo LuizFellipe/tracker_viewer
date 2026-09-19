@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tracker &amp; Wi-Fi Survey Visualizer</title>
+    <title>Tracker, Wi-Fi &amp; Bluetooth Survey Visualizer</title>
     <meta name="description" content="Visualizador interativo de logs GPS e monitor de redes Wi-Fi com OpenStreetMap e gráficos em tempo real.">
     
     <!-- CSS Dependencies -->
@@ -24,6 +24,7 @@
         <nav class="tab-nav">
             <button class="tab-btn active" data-tab="tab-log">Tracker Log</button>
             <button class="tab-btn" data-tab="tab-wifi">Wi-Fi Survey</button>
+            <button class="tab-btn" data-tab="tab-bt">🔵 Bluetooth</button>
         </nav>
         <div style="display: flex; gap: 1rem; align-items: center;">
             <div id="status-indicator" class="status-indicator">
@@ -253,6 +254,101 @@
                     <div class="card-title">Protocolos de Segurança</div>
                     <div class="chart-wrapper">
                         <canvas id="chart-wifi-security"></canvas>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Tab 3: Bluetooth Survey -->
+        <section id="tab-bt" class="tab-content">
+            <div class="control-panel">
+                <div class="panel-title">Carregar Bluetooth survey (ble.txt)</div>
+                <div class="action-buttons">
+                    <span class="file-input-wrapper btn">
+                        <span>Selecionar Arquivo BLE</span>
+                        <input type="file" id="input-bt-file" accept=".txt,.csv" />
+                    </span>
+                </div>
+            </div>
+
+            <!-- Stats Overview -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <span class="stat-label">Registros Detectados</span>
+                    <span id="bt-stat-total" class="stat-value">0</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">Dispositivos Únicos</span>
+                    <span id="bt-stat-unique" class="stat-value">0</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">Com Nome Identificado</span>
+                    <span id="bt-stat-named" class="stat-value">0</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">Melhor Sinal</span>
+                    <span id="bt-stat-best-rssi" class="stat-value">— <span class="stat-unit">dBm</span></span>
+                </div>
+            </div>
+
+            <!-- Visualizer Grid -->
+            <div class="viz-grid">
+                <!-- Map Card -->
+                <div class="card">
+                    <div class="card-title">
+                        Mapa de Dispositivos Bluetooth
+                        <div class="map-legend" id="bt-map-legend">
+                            <span class="legend-dot" style="background:#10b981;"></span><span>Forte (≥ −60)</span>
+                            <span class="legend-dot" style="background:#f59e0b;"></span><span>Médio (−60 a −80)</span>
+                            <span class="legend-dot" style="background:#ef4444;"></span><span>Fraco (< −80)</span>
+                            <span class="legend-dot" style="background:#a855f7;"></span><span>Com nome</span>
+                        </div>
+                    </div>
+                    <div id="map-bt" class="map-container"></div>
+                </div>
+
+                <!-- Device List Card -->
+                <div class="card">
+                    <div class="card-title">Dispositivos Encontrados</div>
+
+                    <div class="search-filter-row">
+                        <input type="text" id="bt-search" class="input-control" placeholder="Buscar por nome ou MAC..." style="flex: 1; min-width: 160px;">
+                        <select id="bt-filter-type" class="input-control">
+                            <option value="all">Todos</option>
+                            <option value="named">Com Nome</option>
+                            <option value="unnamed">Sem Nome</option>
+                        </select>
+                    </div>
+
+                    <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                        <div style="display: flex; justify-content: space-between; font-size: 0.85rem; color: var(--text-secondary);">
+                            <span>Sinal Mínimo</span>
+                            <span id="bt-signal-val">−100 dBm</span>
+                        </div>
+                        <input type="range" id="bt-filter-signal" min="-100" max="-30" value="-100" class="slider" style="width: 100%;">
+                    </div>
+
+                    <div id="bt-list" class="list-panel">
+                        <div style="padding: 1.5rem; text-align: center; color: var(--text-secondary);">Sem dados carregados</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Analytics Charts -->
+            <div class="charts-section">
+                <!-- RSSI Distribution -->
+                <div class="card">
+                    <div class="card-title">Distribuição de Intensidade de Sinal (RSSI)</div>
+                    <div class="chart-wrapper">
+                        <canvas id="chart-bt-rssi"></canvas>
+                    </div>
+                </div>
+
+                <!-- Top Devices / Named devices -->
+                <div class="card">
+                    <div class="card-title">Top Dispositivos Identificados</div>
+                    <div class="chart-wrapper">
+                        <canvas id="chart-bt-top"></canvas>
                     </div>
                 </div>
             </div>

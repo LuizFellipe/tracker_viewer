@@ -3,9 +3,10 @@
 // ============================================================
 let logData = [];
 let wifiData = [];
-let maps = { log: null, wifi: null };
-let markers = { logRoute: null, logLayerGroup: null, wifiLayerGroup: null };
-let charts = { temp: null, hum: null, speed: null, jerk: null, wifiChannels: null, wifiSecurity: null };
+let btData = [];
+let maps = { log: null, wifi: null, bt: null };
+let markers = { logRoute: null, logLayerGroup: null, wifiLayerGroup: null, btLayerGroup: null };
+let charts = { temp: null, hum: null, speed: null, jerk: null, wifiChannels: null, wifiSecurity: null, btRssi: null, btTop: null };
 
 // IMU analysis state
 let imuEvents = [];
@@ -23,6 +24,7 @@ const tabContents    = document.querySelectorAll('.tab-content');
 const btnLoadLocal   = document.getElementById('btn-load-local');
 const inputLogFile   = document.getElementById('input-log-file');
 const inputWifiFile  = document.getElementById('input-wifi-file');
+const inputBtFile    = document.getElementById('input-bt-file');
 const statusDot      = document.getElementById('status-dot');
 const statusText     = document.getElementById('status-text');
 const progressWrap   = document.getElementById('loading-progress-wrap');
@@ -44,6 +46,7 @@ tabBtns.forEach(btn => {
         setTimeout(() => {
             if (targetTab === 'tab-log'  && maps.log)  maps.log.invalidateSize();
             if (targetTab === 'tab-wifi' && maps.wifi) maps.wifi.invalidateSize();
+            if (targetTab === 'tab-bt'  && maps.bt)   maps.bt.invalidateSize();
         }, 100);
     });
 });
@@ -86,6 +89,16 @@ btnLoadLocal.addEventListener('click', async () => {
         const wifiText = await wifiRes.text();
         parseWifiData(wifiText);
 
+        // Load bluetooth (optional — does not fail if absent)
+        try {
+            const btRes = await fetch('/ble.txt');
+            if (btRes.ok) {
+                const btText = await btRes.text();
+                parseBluetoothData(btText);
+                initializeBluetoothDashboard();
+            }
+        } catch (_) { /* ble.txt optional */ }
+
         // Stream log.txt
         await streamLogFile('/log.txt');
 
@@ -117,6 +130,19 @@ inputWifiFile.addEventListener('change', (e) => {
         parseWifiData(evt.target.result);
         setActiveStatus('wifi.txt carregado');
         initializeWifiDashboard();
+    };
+    reader.readAsText(file);
+});
+
+inputBtFile.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setLoadingStatus('Carregando ble.txt...');
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+        parseBluetoothData(evt.target.result);
+        setActiveStatus('ble.txt carregado');
+        initializeBluetoothDashboard();
     };
     reader.readAsText(file);
 });
@@ -1043,3 +1069,337 @@ function renderWifiAnalytics(filteredList) {
         }
     });
 }
+
+// ============================================================
+//  Bluetooth — Parser
+//  Format: data_hora, lat_raw, lon_raw, mac, nome, rssi, canal
+// ============================================================
+function parseBluetoothData(csvText) {
+    btData = [];
+    const lines = csvText.split('\n');
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        const parts = trimmed.split(',');
+        if (parts.length < 6) continue;
+
+        const latRaw = parseInt(parts[1]);
+        const lonRaw = parseInt(parts[2]);
+        if (isNaN(latRaw) || isNaN(lonRaw) || latRaw === 0 || lonRaw === 0) continue;
+
+        const mac   = parts[3].trim();
+        const nome  = parts[4].trim() || '';
+        const rssi  = parseInt(parts[5]) || -100;
+        const canal = parts[6] ? (parseInt(parts[6].trim()) || null) : null;
+
+        btData.push({
+            data_hora: parts[0].trim(),
+            latitude:  latRaw / 1000000,
+            longitude: lonRaw / 1000000,
+            mac,
+            nome,
+            rssi,
+            canal,
+            hasName: nome.length > 0
+        });
+    }
+}
+
+// ============================================================
+//  Bluetooth — Dashboard init
+// ============================================================
+let currentBtFilters = { search: '', minSignal: -100, type: 'all' };
+
+function initializeBluetoothDashboard() {
+    if (btData.length === 0) return;
+    if (!maps.bt) maps.bt = initLeafletMap('map-bt');
+    applyBtFiltersAndRender();
+}
+
+// ============================================================
+//  Bluetooth — Filter event listeners
+// ============================================================
+document.getElementById('bt-search').addEventListener('input', e => {
+    currentBtFilters.search = e.target.value.toLowerCase();
+    applyBtFiltersAndRender();
+});
+
+document.getElementById('bt-filter-signal').addEventListener('input', e => {
+    currentBtFilters.minSignal = parseInt(e.target.value);
+    document.getElementById('bt-signal-val').innerText = e.target.value + ' dBm';
+    applyBtFiltersAndRender();
+});
+
+document.getElementById('bt-filter-type').addEventListener('change', e => {
+    currentBtFilters.type = e.target.value;
+    applyBtFiltersAndRender();
+});
+
+// ============================================================
+//  Bluetooth — Apply filters & render map + list + stats
+// ============================================================
+function applyBtFiltersAndRender() {
+    if (btData.length === 0) return;
+
+    const filtered = btData.filter(d => {
+        const mSearch = d.mac.toLowerCase().includes(currentBtFilters.search) ||
+                        d.nome.toLowerCase().includes(currentBtFilters.search);
+        const mSig  = d.rssi >= currentBtFilters.minSignal;
+        const mType = currentBtFilters.type === 'all' ||
+                      (currentBtFilters.type === 'named'   &&  d.hasName) ||
+                      (currentBtFilters.type === 'unnamed' && !d.hasName);
+        return mSearch && mSig && mType;
+    });
+
+    // --- Stats ---
+    document.getElementById('bt-stat-total').innerText  = filtered.length.toLocaleString('pt-BR');
+    const uniqueMacs = new Set(filtered.map(d => d.mac));
+    document.getElementById('bt-stat-unique').innerText = uniqueMacs.size.toLocaleString('pt-BR');
+    const namedCount = filtered.filter(d => d.hasName).length;
+    document.getElementById('bt-stat-named').innerText  = namedCount.toLocaleString('pt-BR');
+    let bestRssi = -200;
+    filtered.forEach(d => { if (d.rssi > bestRssi) bestRssi = d.rssi; });
+    document.getElementById('bt-stat-best-rssi').innerHTML = filtered.length > 0
+        ? bestRssi + ' <span class="stat-unit">dBm</span>' : '— <span class="stat-unit">dBm</span>';
+
+    // --- Map ---
+    if (markers.btLayerGroup) maps.bt.removeLayer(markers.btLayerGroup);
+    markers.btLayerGroup = L.layerGroup().addTo(maps.bt);
+
+    // Group by location
+    const grouped = {};
+    filtered.forEach(d => {
+        const key = `${d.latitude.toFixed(5)},${d.longitude.toFixed(5)}`;
+        if (!grouped[key]) grouped[key] = { lat: d.latitude, lon: d.longitude, devices: [] };
+        grouped[key].devices.push(d);
+    });
+
+    const allPts = [];
+    Object.values(grouped).forEach(loc => {
+        let bestSig = -200;
+        let hasNamedDevice = false;
+        loc.devices.forEach(d => {
+            if (d.rssi > bestSig) bestSig = d.rssi;
+            if (d.hasName) hasNamedDevice = true;
+        });
+
+        let markerColor = '#ef4444'; // weak
+        if (bestSig >= -60) markerColor = '#10b981';       // strong
+        else if (bestSig >= -80) markerColor = '#f59e0b';  // medium
+        if (hasNamedDevice) markerColor = '#a855f7';       // named device overrides
+
+        const circle = L.circleMarker([loc.lat, loc.lon], {
+            color: markerColor,
+            fillColor: markerColor,
+            fillOpacity: 0.65,
+            radius: 6 + Math.min(loc.devices.length, 8) * 0.5,
+            weight: 1
+        });
+
+        // Build popup
+        let popupHtml = `<div style="font-family:'Outfit',sans-serif;color:#f3f4f6;max-height:220px;overflow-y:auto;">
+            <strong>📍 Local</strong> (${loc.devices.length} dispositivo${loc.devices.length !== 1 ? 's' : ''})<hr style="margin:5px 0;border-color:rgba(255,255,255,0.1);"/>`;
+        const shown = [...loc.devices].sort((a, b) => b.rssi - a.rssi).slice(0, 8);
+        shown.forEach(d => {
+            const sigColor = d.rssi >= -60 ? '#34d399' : (d.rssi >= -80 ? '#fbbf24' : '#f87171');
+            const namePart = d.hasName
+                ? `<strong style="color:#c084fc;">${d.nome}</strong><br/>`
+                : `<span style="color:#6b7280;">[Sem nome]</span><br/>`;
+            popupHtml += `<div style="margin-bottom:6px;">
+                ${namePart}
+                <span style="font-size:0.78rem;color:#9ca3af;">${d.mac}</span><br/>
+                Sinal: <span style="color:${sigColor};font-weight:bold;">${d.rssi} dBm</span>
+                ${d.canal !== null ? `| Ch ${d.canal}` : ''}
+            </div>`;
+        });
+        if (loc.devices.length > 8) popupHtml += `<div style="font-size:0.75rem;color:#6b7280;">+${loc.devices.length - 8} mais...</div>`;
+        popupHtml += '</div>';
+
+        circle.bindPopup(L.popup({ maxWidth: 280 }).setContent(popupHtml));
+        circle.addTo(markers.btLayerGroup);
+        allPts.push([loc.lat, loc.lon]);
+    });
+
+    if (allPts.length > 0) maps.bt.fitBounds(L.latLngBounds(allPts));
+
+    populateBtList(filtered);
+    renderBtAnalytics(filtered);
+}
+
+// ============================================================
+//  Bluetooth — Device list
+// ============================================================
+function populateBtList(filteredList) {
+    const container = document.getElementById('bt-list');
+    container.innerHTML = '';
+
+    if (filteredList.length === 0) {
+        container.innerHTML = '<div style="padding:1.5rem;text-align:center;color:var(--text-secondary);">Nenhum dispositivo encontrado.</div>';
+        return;
+    }
+
+    // Sort: named first, then by RSSI desc
+    const sorted = [...filteredList].sort((a, b) => {
+        if (a.hasName !== b.hasName) return a.hasName ? -1 : 1;
+        return b.rssi - a.rssi;
+    });
+
+    sorted.slice(0, 150).forEach(d => {
+        const item = document.createElement('div');
+        item.className = 'list-item';
+
+        let sigClass = 'badge-danger';
+        if (d.rssi >= -60) sigClass = 'badge-success';
+        else if (d.rssi >= -80) sigClass = 'badge-warning';
+
+        const nameHtml = d.hasName
+            ? `<div class="wifi-name" style="color:#c084fc;">${d.nome}</div>`
+            : `<div class="wifi-name" style="color:#6b7280;">[Sem nome]</div>`;
+
+        item.innerHTML = `
+            <div>
+                ${nameHtml}
+                <div class="wifi-meta">${d.mac}${d.canal !== null ? ` · Ch ${d.canal}` : ''}</div>
+                <div class="wifi-meta" style="font-size:0.7rem;color:#4b5563;">${d.data_hora}</div>
+            </div>
+            <span class="badge ${sigClass}">${d.rssi} dBm</span>
+        `;
+
+        item.addEventListener('click', () => {
+            maps.bt.setView([d.latitude, d.longitude], 18);
+            markers.btLayerGroup.eachLayer(layer => {
+                if (layer.getLatLng &&
+                    Math.abs(layer.getLatLng().lat - d.latitude) < 0.00001 &&
+                    Math.abs(layer.getLatLng().lng - d.longitude) < 0.00001) {
+                    layer.openPopup();
+                }
+            });
+        });
+
+        container.appendChild(item);
+    });
+}
+
+// ============================================================
+//  Bluetooth — Analytics charts
+// ============================================================
+function renderBtAnalytics(filteredList) {
+    // --- RSSI Histogram (buckets of 5 dBm) ---
+    const buckets = {};
+    for (let v = -100; v < -30; v += 5) {
+        const label = `${v} a ${v + 5}`;
+        buckets[label] = 0;
+    }
+    filteredList.forEach(d => {
+        const bucket = Math.floor(d.rssi / 5) * 5;
+        const label = `${bucket} a ${bucket + 5}`;
+        if (buckets[label] !== undefined) buckets[label]++;
+        else buckets[label] = 1;
+    });
+
+    const rssiLabels = Object.keys(buckets);
+    const rssiData   = rssiLabels.map(l => buckets[l]);
+    const rssiColors = rssiLabels.map(l => {
+        const v = parseInt(l.split(' ')[0]);
+        if (v >= -60) return 'rgba(16,185,129,0.7)';
+        if (v >= -80) return 'rgba(245,158,11,0.7)';
+        return 'rgba(239,68,68,0.7)';
+    });
+
+    if (charts.btRssi) charts.btRssi.destroy();
+    charts.btRssi = new Chart(document.getElementById('chart-bt-rssi').getContext('2d'), {
+        type: 'bar',
+        data: {
+            labels: rssiLabels,
+            datasets: [{
+                label: 'Dispositivos',
+                data: rssiData,
+                backgroundColor: rssiColors,
+                borderColor: 'rgba(255,255,255,0.05)',
+                borderWidth: 1,
+                borderRadius: 3
+            }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            scales: {
+                x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9ca3af', maxRotation: 45, font: { size: 9 } } },
+                y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9ca3af' } }
+            },
+            plugins: { legend: { display: false } }
+        }
+    });
+
+    // --- Top Named Devices (bar chart by name, avg RSSI) ---
+    const namedGroups = {};
+    filteredList.filter(d => d.hasName).forEach(d => {
+        if (!namedGroups[d.nome]) namedGroups[d.nome] = { total: 0, count: 0 };
+        namedGroups[d.nome].total += d.rssi;
+        namedGroups[d.nome].count++;
+    });
+
+    const topNames = Object.entries(namedGroups)
+        .map(([name, v]) => ({ name, avg: v.total / v.count, count: v.count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 12);
+
+    const topLabels = topNames.map(t => t.name.length > 18 ? t.name.slice(0, 15) + '…' : t.name);
+    const topCounts = topNames.map(t => t.count);
+    const topAvgRssi = topNames.map(t => Math.round(t.avg));
+
+    const paletteTop = ['rgba(168,85,247,0.7)','rgba(59,130,246,0.7)','rgba(16,185,129,0.7)',
+                        'rgba(245,158,11,0.7)','rgba(239,68,68,0.7)','rgba(96,165,250,0.7)',
+                        'rgba(52,211,153,0.7)','rgba(251,191,36,0.7)','rgba(248,113,113,0.7)',
+                        'rgba(192,132,252,0.7)','rgba(129,140,248,0.7)','rgba(45,212,191,0.7)'];
+
+    if (charts.btTop) charts.btTop.destroy();
+
+    if (topNames.length === 0) {
+        // No named devices — show a friendly message via a blank chart with annotation
+        charts.btTop = new Chart(document.getElementById('chart-bt-top').getContext('2d'), {
+            type: 'bar',
+            data: { labels: ['Sem dispositivos nomeados'], datasets: [{ data: [0], backgroundColor: 'transparent' }] },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    title: { display: true, text: 'Nenhum dispositivo com nome identificado', color: '#6b7280', font: { family: 'Outfit', size: 13 } }
+                },
+                scales: { x: { display: false }, y: { display: false } }
+            }
+        });
+        return;
+    }
+
+    charts.btTop = new Chart(document.getElementById('chart-bt-top').getContext('2d'), {
+        type: 'bar',
+        data: {
+            labels: topLabels,
+            datasets: [{
+                label: 'Detecções',
+                data: topCounts,
+                backgroundColor: paletteTop.slice(0, topLabels.length),
+                borderColor: 'rgba(255,255,255,0.05)',
+                borderWidth: 1,
+                borderRadius: 4
+            }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            indexAxis: 'y',
+            scales: {
+                x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9ca3af' } },
+                y: { grid: { display: false }, ticks: { color: '#f3f4f6', font: { family: 'Outfit', size: 11 } } }
+            },
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        afterLabel: (ctx) => `RSSI médio: ${topAvgRssi[ctx.dataIndex]} dBm`
+                    }
+                }
+            }
+        }
+    });
+}
+
