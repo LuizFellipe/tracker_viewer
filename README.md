@@ -1,34 +1,32 @@
-# Tracker & Wi-Fi Survey Viewer
+# Tracker, Wi-Fi & Bluetooth Survey Viewer
 
-Uma aplicação web (Single-Page Application) premium, moderna e responsiva, desenvolvida para visualizar e analisar dados de geolocalização e intensidade de sinal Wi-Fi a partir de arquivos de logs coletados por um rastreador.
+Uma aplicação web (Single-Page Application) premium, moderna e responsiva, desenvolvida para visualizar e analisar dados de geolocalização, sensores inerciais/ambientais (IMU/DHT), redes Wi-Fi e sinais Bluetooth (BLE) a partir de logs coletados por um rastreador veicular/embarcado.
 
-A interface possui estilo *dark mode* refinado com estética de *glassmorphism* (cartões translúcidos), gráficos de linha temporais interativos, painéis colapsáveis e mapas interativos baseados em dados abertos (OpenStreetMap).
+A interface possui estilo *dark mode* refinado com estética de *glassmorphism* (cartões translúcidos), gráficos temporais interativos, suporte a multi-sessões organizadas por data, mapas com alta densidade de pontos e painel de ingestão de arquivos.
 
 ---
 
 ## 🛠️ Tecnologias Utilizadas
 
-A aplicação foi projetada sem a necessidade de etapas complexas de compilação ou chaves de API pagas. Utiliza:
-
 1. **Estrutura & Estilo:**
-   - **HTML5 Semântico** para melhor acessibilidade e estrutura limpa.
-   - **CSS3 Vanilla** com variáveis de design customizadas, fontes premium (Outfit via Google Fonts) e efeitos modernos de desfoque de fundo (*backdrop-filter*).
+   - **HTML5 Semântico** para estrutura acessível e clara.
+   - **CSS3 Vanilla** com design system via variáveis customizadas, tipografia Outfit (Google Fonts) e efeitos modernos de desfoque (*backdrop-filter*).
 
 2. **Mapas Interativos:**
-   - **[Leaflet.js](https://leafletjs.com/)** (v1.9.4) para plotagem de rotas e marcadores.
-   - Utilização de `L.canvas()` para renderização performática de dezenas de milhares de pontos.
-   - Provedor de mapas **CartoDB (Dark Matter)**, oferecendo um estilo escuro elegante que combina perfeitamente com a aplicação, sem requisições de tokens ou chaves de acesso.
+   - **[Leaflet.js](https://leafletjs.com/)** (v1.9.4) com renderização via `L.canvas()` para suportar dezenas de milhares de pontos geográficos sem lentidão.
+   - Base cartográfica ESRI World Street Map e CartoDB.
 
 3. **Gráficos e Analíticos:**
-   - **[Chart.js](https://www.chartjs.org/)** para a renderização rápida de múltiplos datasets.
-   - **Algoritmo LTTB (Largest-Triangle-Three-Buckets):** Implementado nativamente em JavaScript para fazer o *downsampling* visual de enormes volumes de dados (ex: reduzindo de 34.000 pontos para 800), preservando com exatidão a forma visual da curva e os picos cruciais.
+   - **[Chart.js](https://www.chartjs.org/)** com múltiplos datasets interativos (velocidade, satélites, temperatura, umidade, jerk, histograma RSSI e top dispositivos BLE).
+   - **Algoritmo LTTB (Largest-Triangle-Three-Buckets):** Redução amostral temporal preservando fidelidade visual e picos reais de eventos.
 
-4. **Lógica de Aplicação e Performance:**
-   - **JavaScript ES6+** nativo.
-   - **Streaming Progressivo (`ReadableStream`):** Arquivos grandes (`log.txt`) são baixados e processados em blocos (chunks), permitindo que o mapa e a interface comecem a ser preenchidos imediatamente sem travar o navegador.
+4. **Pipeline de Ingestão e Persistência:**
+   - **Formato JSON Particionado por Data:** Estrutura compacta com separação por dia (`data/YYYY-MM-DD.json`) e catálogo central (`data/dataset_index.json`).
+   - **Deduplicação Inteligente:** Filtra registros redundantes por chave composta `(tipo, timestamp, lat, lon, identificador)`.
+   - **Ingestão Web & CLI:** Importação direta via interface web (arrastar e soltar arquivos) e via script Python offline (`ingest.py`).
 
 5. **Servidor Local:**
-   - Script auxiliar em **Python 3** (`serve.py`) contendo um servidor HTTP leve habilitado com CORS, permitindo o carregamento via streaming dos arquivos locais.
+   - Script em **Python 3** (`serve.py`) com servidor HTTP leve e cabeçalhos CORS habilitados.
 
 ---
 
@@ -36,55 +34,70 @@ A aplicação foi projetada sem a necessidade de etapas complexas de compilaçã
 
 ```text
 tracker_viewer/
-├── index.html       # Estrutura principal da SPA
-├── style.css        # Estilos gerais, temas e responsividade
-├── app.js           # Lógica core: streaming, parser, detecção IMU, mapas, LTTB e gráficos
-├── serve.py         # Script Python para servir a aplicação localmente
-├── log.txt          # Arquivo contendo os dados do GPS e dos sensores IMU/DHT
-├── wifi.txt         # Arquivo contendo as redes Wi-Fi escaneadas
-└── CONTEXT.md       # Glossário de domínio com termos de análise IMU e variáveis ambientais
+├── data/                    # Datasets particionados por data (JSON)
+│   ├── dataset_index.json   # Manifesto/índice central de todas as sessões
+│   └── YYYY-MM-DD.json      # Dados consolidados do dia (log, wifi, ble)
+├── log/                     # Arquivos originais brutos e sessões de coleta
+│   ├── 01/ .. 04/           # Pastas com trios log.txt, wifi.txt, ble.txt
+│   └── *.txt                # Dumps e coletas avulsas
+├── index.html               # Aplicação SPA
+├── style.css                # Estilos, variáveis e componentes de interface
+├── app.js                   # Lógica da aplicação: ingestão, mapas, IMU, filtros e gráficos
+├── ingest.py                # Script de ingestão, sanitização, deduplicação e geração JSON
+├── serve.py                 # Servidor HTTP local
+├── CONTEXT.md               # Glossário de termos e definições do domínio
+└── README.md                # Documentação do projeto
 ```
 
 ---
 
 ## 🚀 Como Executar o Projeto
 
-Para abrir e rodar a aplicação localmente:
-
-1. Certifique-se de que possui o Python instalado em seu computador.
-2. Inicie o servidor local executando o seguinte comando no terminal na raiz do projeto:
+1. Certifique-se de ter o Python 3 instalado.
+2. (Opcional) Se tiver novos arquivos em `log/`, processe a base para JSON executando:
+   ```bash
+   python3 ingest.py
+   ```
+3. Inicie o servidor local:
    ```bash
    python3 serve.py
    ```
-3. Abra o seu navegador web favorito e acesse:
+4. Abra o navegador web em:
    ```text
-   http://localhost:8000/index.html
+   http://localhost:8000/
    ```
-4. Na página inicial, clique em **"Carregar Arquivos do Workspace"**. Uma barra de progresso indicará o status do carregamento via streaming progressivo.
+5. Na barra superior:
+   - Escolha o dia desejado no seletor **📅 Data** e clique em **"Carregar Dataset"**.
+   - Ou clique em **"➕ Ingerir Arquivos"** para adicionar arquivos `.txt`, `.csv` ou `.json` avulsos diretamente pelo navegador.
+   - Use **"⬇ Exportar JSON"** para baixar o payload consolidado do dia ativo.
 
 ---
 
-## 📊 Funcionamento e Recursos da Interface
+## 📊 Módulos e Recursos da Interface
 
-A interface é dividida em duas abas principais acessíveis no menu superior:
+### 1. 📡 Tracker Log (Telemetria GPS & Sensores IMU/DHT)
+- **Cards de Métricas:** Pontos registrados, velocidade máxima, médias de temperatura e umidade e total de eventos de impacto.
+- **Classificação Automática de Pista (IMU):**
+  - Cálculo de **Jerk** vertical com **Thresholds Adaptativos** calculados sobre a média e desvio padrão.
+  - Diferenciação entre **Solavanco Leve**, **Impacto Forte** e **Curva Brusca** (cruzamento com Giroscópio).
+- **Popup Interativo com Mini-Gauge SVG:** Apresenta velocímetro de intensidade de impacto e leituras de todos os eixos inerciais e ambientais.
+- **Barra de Conforto Térmico (Heat Index):** Visualização colorida da sensação térmica ao longo do tempo.
+- **Gráficos com LTTB:** Curvas de velocidade, satélites GPS, temperatura, umidade e variação de aceleração ($\Delta ac_z$).
 
-### 1. Tracker Log (Dados do Rastreador)
-Esta aba foca no mapeamento geográfico e dados ambientais do rastreador a partir do arquivo `log.txt`:
-* **Resumos em Destaque:** Exibe cards com estatísticas de velocidade máxima atingida, quantidade de pontos, média de temperatura/umidade e contagem total de eventos de trepidação.
-* **Mapa Canvas de Alta Performance:** Renderiza todos os pontos coletados com cores que representam anomalias na pista (Normal, Solavanco Leve, Impacto Forte, Curva Brusca).
-* **Popup Rico com Mini-Gauge:** Ao clicar em um ponto no mapa, abre um popup customizado contendo todos os dados ambientais daquele momento, além de um gráfico SVG gauge animado indicando a intensidade do impacto medido pelos sensores inerciais (IMU).
-* **Conforto Térmico (Heat Index):** Combina os valores de Temperatura e Umidade em uma faixa colorida (Heatbar), mapeando a percepção humana (Fresco, Confortável, Quente, Crítico) no decorrer de toda a viagem, acompanhada dos gráficos detalhados.
-* **Análise Inteligente de Trepidação (IMU):** 
-  - Calcula o *jerk* (variação brusca da aceleração vertical) e ajusta **Thresholds Adaptativos** de forma autônoma para cada arquivo (calibrando com base na média e desvio padrão locais).
-  - Utiliza os dados do Giroscópio para distinguir curvas fechadas de reais defeitos na pista.
-  - Painel colapsável que mostra a distribuição temporal do impacto no gráfico e apresenta uma lista interativa de ocorrências que o leva direto ao ponto correspondente no mapa.
+### 2. 📶 Wi-Fi Survey (Redes Sem Fio)
+- **Mapa de Densidade e Cobertura:** Marcadores dimensionados pela quantidade de redes e coloridos pela potência do sinal ($\ge -60$ dBm verde, $-60$ a $-80$ dBm amarelo, $<-80$ dBm vermelho).
+- **Popup de Varredura Local:** Lista todas as redes detectadas no ponto com SSID, dBm, canal e tipo de segurança.
+- **Filtros em Tempo Real:** Busca textual por SSID/segurança, filtro por canal de transmissão e controle deslizante de sinal mínimo.
+- **Gráficos Analíticos:** Ocupação do espectro por canal e divisão percentual de protocolos de segurança (WPA2, WPA3, Open, etc.).
 
-### 2. Wi-Fi Survey (Redes Wi-Fi Escaneadas)
-Esta aba exibe e classifica redes sem fio encontradas durante a varredura a partir do arquivo `wifi.txt`:
-* **Mapa de Sinais:** Exibe marcadores coloridos com base na potência do sinal recebido (dBm). 
-  - 🟢 **Sinal Forte** ($\ge -60$ dBm)
-  - 🟡 **Sinal Médio** ($-60$ dBm a $-80$ dBm)
-  - 🔴 **Sinal Fraco** ($< -80$ dBm)
-  - Clicar em um círculo no mapa revela um popup contendo a listagem de todas as SSIDs detectadas naquele exato ponto geográfico, ordenadas pela intensidade do sinal.
-* **Filtros e Busca:** Permite refinar o conteúdo da lista lateral buscando pelo nome da rede (SSID), escolhendo um canal específico ou alterando a intensidade mínima de sinal tolerável no seletor deslizante.
-* **Gráficos de Distribuição:** Apresenta um gráfico de colunas mostrando a utilização dos canais de rádio e um gráfico de rosca mostrando a adoção de protocolos de segurança (WPA2, WPA3, etc.).
+### 3. 🔵 Bluetooth (BLE Survey)
+- **Rastreamento de Dispositivos BLE:** Identificação de endereços MAC, nomes de dispositivos (ex: veículos BYD, smart tags, beacons) e canal de detecção.
+- **Filtros Dedicados:** Busca por nome/MAC, filtro de intensidade de sinal e chaveamento entre *Todos*, *Com nome* e *Sem nome*.
+- **Analíticos BLE:**
+  - Histograma de distribuição de potência RSSI em intervalos de 5 dBm.
+  - Gráfico dos Top Dispositivos identificados por frequência de detecção e RSSI médio.
+
+### 4. ⚡ Ingestão Dinâmica & Exportação
+- **Ingestão Multi-formato:** Suporte a arquivos `log.txt`, `wifi.txt`, `ble.txt` ou arquivos consolidados `.json`.
+- **Deduplicação Automática:** Previne duplicação de pontos ao carregar arquivos repetidos ou sobrepostos.
+- **Exportação One-Click:** Gera cópia estruturada em JSON pronto para integrações externas ou backups.

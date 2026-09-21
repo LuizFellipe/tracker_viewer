@@ -25,6 +25,9 @@ const btnLoadLocal   = document.getElementById('btn-load-local');
 const inputLogFile   = document.getElementById('input-log-file');
 const inputWifiFile  = document.getElementById('input-wifi-file');
 const inputBtFile    = document.getElementById('input-bt-file');
+const selectDateSession = document.getElementById('select-date-session');
+const inputBatchFiles   = document.getElementById('input-batch-files');
+const btnExportJson     = document.getElementById('btn-export-json');
 const statusDot      = document.getElementById('status-dot');
 const statusText     = document.getElementById('status-text');
 const progressWrap   = document.getElementById('loading-progress-wrap');
@@ -63,6 +66,15 @@ btnImuToggle.addEventListener('click', () => {
 // ============================================================
 //  Status helpers
 // ============================================================
+function escapeHtml(s) {
+    return String(s ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+}
+
 function setLoadingStatus(text) { statusDot.className = 'dot loading'; statusText.innerText = text; }
 function setActiveStatus(text)  { statusDot.className = 'dot active';  statusText.innerText = text; }
 function setErrorStatus(text)   { statusDot.className = 'dot';         statusText.innerText = 'Erro: ' + text; }
@@ -78,9 +90,17 @@ function hideProgress() {
 }
 
 // ============================================================
-//  Load Workspace button — streaming fetch
+//  Load Workspace / Dataset button
 // ============================================================
 btnLoadLocal.addEventListener('click', async () => {
+    // Se o dataset particionado estiver disponível, carrega a data atualmente selecionada (ou a mais recente)
+    if (datasetIndex && datasetIndex.dates && Object.keys(datasetIndex.dates).length > 0) {
+        const dates = Object.keys(datasetIndex.dates).sort().reverse();
+        const target = selectDateSession && selectDateSession.value ? selectDateSession.value : dates[0];
+        await loadDateData(target);
+        return;
+    }
+
     setLoadingStatus('Carregando arquivos do workspace...');
     try {
         // Load wifi synchronously (smaller file)
@@ -153,6 +173,7 @@ inputBtFile.addEventListener('change', (e) => {
 async function streamLogFile(url) {
     logData = [];
     logMarkers = [];
+    resetLogMarkersLayer();
 
     const response = await fetch(url);
     if (!response.ok) throw new Error('log.txt não encontrado');
@@ -185,15 +206,18 @@ async function streamLogFile(url) {
 
         for (const line of lines) {
             const trimmed = line.trim();
-            if (!trimmed) continue;
+            if (!trimmed || trimmed.startsWith('#')) continue;
 
             if (!headerParsed) {
-                headers = trimmed.split(',').map(h => h.trim());
-                headerParsed = true;
-                continue;
+                if (isHeaderLine(trimmed)) {
+                    headers = trimmed.split(',').map(h => h.trim());
+                    headerParsed = true;
+                    continue;
+                }
+                // Sem header (ex: log/04/log.txt): parsing posicional direto
             }
 
-            const row = parseSingleRow(trimmed, headers);
+            const row = headerParsed ? parseSingleRow(trimmed, headers) : parsePositionalRow(trimmed);
             if (!row) continue;
 
             logData.push(row);
@@ -209,8 +233,8 @@ async function streamLogFile(url) {
     }
 
     // Parse remaining text
-    if (remainder.trim() && headerParsed) {
-        const row = parseSingleRow(remainder.trim(), headers);
+    if (remainder.trim() && (headerParsed || !isHeaderLine(remainder.trim()))) {
+        const row = headerParsed ? parseSingleRow(remainder.trim(), headers) : parsePositionalRow(remainder.trim());
         if (row) { logData.push(row); chunkBuffer.push(row); }
     }
     if (chunkBuffer.length > 0) flushChunkToMap(chunkBuffer);
@@ -228,6 +252,7 @@ async function streamLogFile(url) {
 async function streamBlobFile(file) {
     logData = [];
     logMarkers = [];
+    resetLogMarkersLayer();
 
     const CHUNK_BYTES = 512 * 1024; // 512KB per read
     let offset = 0;
@@ -251,15 +276,18 @@ async function streamBlobFile(file) {
 
         for (const line of lines) {
             const trimmed = line.trim();
-            if (!trimmed) continue;
+            if (!trimmed || trimmed.startsWith('#')) continue;
 
             if (!headerParsed) {
-                headers = trimmed.split(',').map(h => h.trim());
-                headerParsed = true;
-                continue;
+                if (isHeaderLine(trimmed)) {
+                    headers = trimmed.split(',').map(h => h.trim());
+                    headerParsed = true;
+                    continue;
+                }
+                // Sem header: parsing posicional direto
             }
 
-            const row = parseSingleRow(trimmed, headers);
+            const row = headerParsed ? parseSingleRow(trimmed, headers) : parsePositionalRow(trimmed);
             if (!row) continue;
 
             logData.push(row);
@@ -273,8 +301,8 @@ async function streamBlobFile(file) {
         }
     }
 
-    if (remainder.trim() && headerParsed) {
-        const row = parseSingleRow(remainder.trim(), headers);
+    if (remainder.trim() && (headerParsed || !isHeaderLine(remainder.trim()))) {
+        const row = headerParsed ? parseSingleRow(remainder.trim(), headers) : parsePositionalRow(remainder.trim());
         if (row) { logData.push(row); chunkBuffer.push(row); }
     }
     if (chunkBuffer.length > 0) flushChunkToMap(chunkBuffer);
@@ -291,6 +319,50 @@ async function streamBlobFile(file) {
 // ============================================================
 //  Parse single CSV row
 // ============================================================
+function isHeaderLine(trimmed) {
+    const lower = trimmed.toLowerCase();
+    if (lower.startsWith('data_hora')) return true;
+    const cols = lower.split(',').map(c => c.trim());
+    return cols.includes('lat') && cols.includes('lon');
+}
+
+// Parsing posicional (fallback para logs sem header), igual ao ingest.py:
+// data_hora, lat, lon, sat, hdop, kmh, direcao, umidade, temp, ac_x/y/z, gy_x/y/z
+function parsePositionalRow(line) {
+    const parts = line.split(',');
+    if (parts.length < 14) return null;
+
+    const m = parts[0].trim().match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2}):(\d{2})/);
+    if (!m) return null;
+    const [, d, mo, y, hh, mm, ss] = m;
+    const yr = parseInt(y);
+    if (yr < 2020 || yr > 2035) return null;
+
+    const latRaw = parseInt(parts[1]);
+    const lonRaw = parseInt(parts[2]);
+    if (isNaN(latRaw) || isNaN(lonRaw) || latRaw === 0 || lonRaw === 0) return null;
+
+    return {
+        data_hora: parts[0].trim(),
+        latitude:  latRaw / 1000000,
+        longitude: lonRaw / 1000000,
+        sat:       parseInt(parts[3])       || 0,
+        hdop:      parseFloat(parts[4])     || 0.0,
+        kmh:       parseFloat(parts[5])     || 0.0,
+        direcao:   parts[6] ? parts[6].trim() : '',
+        umidade:   parseFloat(parts[7])     || 0.0,
+        temp_dht:  parseFloat(parts[8])     || 0.0,
+        ac_x:      parseFloat(parts[9])     || 0.0,
+        ac_y:      parseFloat(parts[10])    || 0.0,
+        ac_z:      parseFloat(parts[11])    || 0.0,
+        gy_x:      parseFloat(parts[12])    || 0.0,
+        gy_y:      parseFloat(parts[13])    || 0.0,
+        gy_z:      parts.length > 14 ? (parseFloat(parts[14]) || 0.0) : 0.0,
+        jerk:      0,
+        eventType: 'normal'
+    };
+}
+
 function parseSingleRow(line, headers) {
     const parts = line.split(',');
     if (parts.length < headers.length) return null;
@@ -322,15 +394,24 @@ function parseSingleRow(line, headers) {
 // ============================================================
 //  Flush chunk to map (progressive rendering)
 // ============================================================
+function resetLogMarkersLayer() {
+    if (maps.log && markers.logLayerGroup) {
+        maps.log.removeLayer(markers.logLayerGroup);
+    }
+    markers.logLayerGroup = null;
+}
+
 function flushChunkToMap(chunk) {
     if (!maps.log) {
-        const firstPt = chunk[0];
         maps.log = initLeafletMap('map-log');
         canvasRenderer = L.canvas({ padding: 0.5 });
     }
+    if (!markers.logLayerGroup) {
+        markers.logLayerGroup = L.layerGroup().addTo(maps.log);
+    }
 
+    const baseIdx = logData.length - chunk.length;
     chunk.forEach((pt, localIdx) => {
-        const globalIdx = logData.indexOf(pt);
         const marker = L.circleMarker([pt.latitude, pt.longitude], {
             renderer: canvasRenderer,
             radius: 3,
@@ -340,8 +421,8 @@ function flushChunkToMap(chunk) {
             weight: 0,
         });
 
-        marker.on('click', () => openPointPopup(marker, pt, globalIdx < 0 ? logData.length - chunk.length + localIdx : globalIdx));
-        marker.addTo(maps.log);
+        marker.on('click', () => openPointPopup(marker, pt, baseIdx + localIdx));
+        marker.addTo(markers.logLayerGroup);
         logMarkers.push(marker);
     });
 
@@ -385,49 +466,48 @@ function updateStatCards() {
 }
 
 // ============================================================
-//  LTTB Downsampling
+//  LTTB Downsampling — retorna índices originais selecionados
 // ============================================================
-function lttb(data, threshold) {
-    const len = data.length;
-    if (threshold >= len || threshold === 0) return data;
+function lttbIndices(values, threshold) {
+    const len = values.length;
+    if (threshold >= len || threshold < 3) {
+        return values.map((_, i) => i);
+    }
 
-    const sampled = [];
+    const sampled = [0];
     let a = 0;
-    sampled.push(data[0]);
-
     const bucketSize = (len - 2) / (threshold - 2);
 
     for (let i = 0; i < threshold - 2; i++) {
-        let avgX = 0, avgY = 0;
         const avgRangeStart = Math.floor((i + 1) * bucketSize) + 1;
         const avgRangeEnd   = Math.min(Math.floor((i + 2) * bucketSize) + 1, len);
         const avgRangeLen   = avgRangeEnd - avgRangeStart;
+        if (avgRangeLen <= 0) continue;
 
+        let avgX = 0, avgY = 0;
         for (let j = avgRangeStart; j < avgRangeEnd; j++) {
-            avgX += data[j].x !== undefined ? data[j].x : j;
-            avgY += data[j].y !== undefined ? data[j].y : data[j];
+            avgX += j;
+            avgY += values[j];
         }
         avgX /= avgRangeLen;
         avgY /= avgRangeLen;
 
         const rangeStart = Math.floor(i * bucketSize) + 1;
         const rangeEnd   = Math.min(Math.floor((i + 1) * bucketSize) + 1, len);
-        const pointAX    = data[a].x !== undefined ? data[a].x : a;
-        const pointAY    = data[a].y !== undefined ? data[a].y : data[a];
+        const pointAX = a;
+        const pointAY = values[a];
 
         let maxArea = -1, maxIdx = rangeStart;
         for (let j = rangeStart; j < rangeEnd; j++) {
-            const px = data[j].x !== undefined ? data[j].x : j;
-            const py = data[j].y !== undefined ? data[j].y : data[j];
-            const area = Math.abs((pointAX - avgX) * (py - pointAY) - (pointAX - px) * (avgY - pointAY)) * 0.5;
+            const area = Math.abs((pointAX - avgX) * (values[j] - pointAY) - (pointAX - j) * (avgY - pointAY)) * 0.5;
             if (area > maxArea) { maxArea = area; maxIdx = j; }
         }
 
-        sampled.push(data[maxIdx]);
+        sampled.push(maxIdx);
         a = maxIdx;
     }
 
-    sampled.push(data[len - 1]);
+    sampled.push(len - 1);
     return sampled;
 }
 
@@ -574,7 +654,7 @@ function heatIndexColor(hi) {
 
 function renderHeatbar() {
     const canvas = document.getElementById('chart-heatbar');
-    if (!canvas) return;
+    if (!canvas || !logData || logData.length === 0) return;
     const ctx = canvas.getContext('2d');
 
     // Downsample to ~400 segments
@@ -614,21 +694,19 @@ function renderHeatbar() {
 // ============================================================
 function renderLogCharts() {
     const TARGET = 800;
-    const rawIndices = logData.map((_, i) => i);
     const rawLabels  = logData.map(d => d.data_hora.split(' ')[1] || d.data_hora);
 
-    // Helper: downsample preserving original indices
+    // Helper: LTTB downsample preservando índices originais
     function dsData(arr) {
-        if (arr.length <= TARGET) return { vals: arr, labels: rawLabels, indices: rawIndices };
-        const step = arr.length / TARGET;
-        const sampled = [], sampledLabels = [], sampledIdx = [];
-        for (let i = 0; i < TARGET; i++) {
-            const idx = Math.min(Math.floor(i * step), arr.length - 1);
-            sampled.push(arr[idx]);
-            sampledLabels.push(rawLabels[idx]);
-            sampledIdx.push(idx);
+        if (arr.length <= TARGET) {
+            return { vals: arr, labels: rawLabels, indices: arr.map((_, i) => i) };
         }
-        return { vals: sampled, labels: sampledLabels, indices: sampledIdx };
+        const indices = lttbIndices(arr, TARGET);
+        return {
+            vals: indices.map(i => arr[i]),
+            labels: indices.map(i => rawLabels[i]),
+            indices
+        };
     }
 
     const dTemp  = dsData(logData.map(d => d.temp_dht));
@@ -965,9 +1043,9 @@ function applyWifiFiltersAndRender() {
         loc.networks.sort((a,b) => b.potencia - a.potencia).forEach(n => {
             const sigColor = n.potencia >= -60 ? '#34d399' : (n.potencia >= -80 ? '#fbbf24' : '#f87171');
             popupHtml += `<div style="margin-bottom:6px;">
-                <strong style="color:#93c5fd;">${n.ssid}</strong><br/>
+                <strong style="color:#93c5fd;">${escapeHtml(n.ssid)}</strong><br/>
                 Sinal: <span style="color:${sigColor};font-weight:bold;">${n.potencia} dBm</span> |
-                Ch: ${n.canal} | ${n.seguranca}
+                Ch: ${n.canal} | ${escapeHtml(n.seguranca)}
             </div>`;
         });
         popupHtml += '</div>';
@@ -1007,8 +1085,8 @@ function populateWifiList(filteredList) {
         else if (w.potencia >= -80) signalClass = 'badge-warning';
         item.innerHTML = `
             <div>
-                <div class="wifi-name">${w.ssid}</div>
-                <div class="wifi-meta">Ch: ${w.canal} | ${w.seguranca}</div>
+                <div class="wifi-name">${escapeHtml(w.ssid)}</div>
+                <div class="wifi-meta">Ch: ${w.canal} | ${escapeHtml(w.seguranca)}</div>
                 <div class="wifi-meta" style="font-size:0.7rem;color:#4b5563;">${w.data_hora}</div>
             </div>
             <span class="badge ${signalClass}">${w.potencia} dBm</span>
@@ -1203,11 +1281,11 @@ function applyBtFiltersAndRender() {
         shown.forEach(d => {
             const sigColor = d.rssi >= -60 ? '#34d399' : (d.rssi >= -80 ? '#fbbf24' : '#f87171');
             const namePart = d.hasName
-                ? `<strong style="color:#c084fc;">${d.nome}</strong><br/>`
+                ? `<strong style="color:#c084fc;">${escapeHtml(d.nome)}</strong><br/>`
                 : `<span style="color:#6b7280;">[Sem nome]</span><br/>`;
             popupHtml += `<div style="margin-bottom:6px;">
                 ${namePart}
-                <span style="font-size:0.78rem;color:#9ca3af;">${d.mac}</span><br/>
+                <span style="font-size:0.78rem;color:#9ca3af;">${escapeHtml(d.mac)}</span><br/>
                 Sinal: <span style="color:${sigColor};font-weight:bold;">${d.rssi} dBm</span>
                 ${d.canal !== null ? `| Ch ${d.canal}` : ''}
             </div>`;
@@ -1253,13 +1331,13 @@ function populateBtList(filteredList) {
         else if (d.rssi >= -80) sigClass = 'badge-warning';
 
         const nameHtml = d.hasName
-            ? `<div class="wifi-name" style="color:#c084fc;">${d.nome}</div>`
+            ? `<div class="wifi-name" style="color:#c084fc;">${escapeHtml(d.nome)}</div>`
             : `<div class="wifi-name" style="color:#6b7280;">[Sem nome]</div>`;
 
         item.innerHTML = `
             <div>
                 ${nameHtml}
-                <div class="wifi-meta">${d.mac}${d.canal !== null ? ` · Ch ${d.canal}` : ''}</div>
+                <div class="wifi-meta">${escapeHtml(d.mac)}${d.canal !== null ? ` · Ch ${d.canal}` : ''}</div>
                 <div class="wifi-meta" style="font-size:0.7rem;color:#4b5563;">${d.data_hora}</div>
             </div>
             <span class="badge ${sigClass}">${d.rssi} dBm</span>
@@ -1402,4 +1480,423 @@ function renderBtAnalytics(filteredList) {
         }
     });
 }
+
+// ============================================================
+// ============================================================
+//  Ingestion & Multi-Date JSON Management
+// ============================================================
+
+let datasetIndex = null;
+let currentLoadedDate = null;
+let activeDayPayload = null; // Armazena payload do dia ativo para exportação
+const memoryDayPayloads = {}; // Armazena payloads em memória (ex: ingestão via browser)
+
+// Inicialização: carregar dataset_index.json se disponível
+async function initDatasetIndex() {
+    if (!selectDateSession) return;
+    try {
+        const res = await fetch('/data/dataset_index.json');
+        if (!res.ok) {
+            selectDateSession.innerHTML = '<option value="">Sem índice JSON gerado</option>';
+            return;
+        }
+        datasetIndex = await res.json();
+        const targetDate = populateDateSelector();
+        if (targetDate) {
+            await loadDateData(targetDate);
+        } else {
+            setActiveStatus('Selecione uma data para carregar');
+        }
+    } catch (err) {
+        selectDateSession.innerHTML = '<option value="">Erro ao carregar índice</option>';
+    }
+}
+
+function formatDateBR(isoDate) {
+    const [y, m, d] = isoDate.split('-');
+    return `${d}/${m}/${y}`;
+}
+
+function populateDateSelector(selectedDate = null) {
+    if (!datasetIndex || !datasetIndex.dates) return null;
+    const dates = Object.keys(datasetIndex.dates).sort().reverse();
+    selectDateSession.innerHTML = '';
+
+    if (dates.length === 0) {
+        selectDateSession.innerHTML = '<option value="">Nenhum dia encontrado</option>';
+        return null;
+    }
+
+    // Placeholder: nenhuma data carregada até o usuário escolher
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'Selecione uma data...';
+    selectDateSession.appendChild(placeholder);
+
+    // Opções individuais por data (mais recente primeiro)
+    dates.forEach(d => {
+        const info = datasetIndex.dates[d];
+        const opt = document.createElement('option');
+        opt.value = d;
+        const details = [];
+        if (info.log_count > 0) details.push(`${info.log_count.toLocaleString('pt-BR')} pts`);
+        if (info.wifi_count > 0) details.push(`${info.wifi_count.toLocaleString('pt-BR')} wifi`);
+        if (info.ble_count > 0) details.push(`${info.ble_count.toLocaleString('pt-BR')} ble`);
+        opt.textContent = `${formatDateBR(d)} (${details.join(' · ') || 'vazio'})`;
+        selectDateSession.appendChild(opt);
+    });
+
+    const targetDate = selectedDate && dates.includes(selectedDate) ? selectedDate : '';
+    selectDateSession.value = targetDate;
+    return targetDate;
+}
+
+// Carrega estritamente o dia selecionado
+async function loadDateData(dateStr) {
+    if (!datasetIndex || !datasetIndex.dates || !dateStr) return;
+    if (!datasetIndex.dates[dateStr]) return;
+
+    setLoadingStatus(`Carregando dados de ${formatDateBR(dateStr)}...`);
+    setProgress(20);
+
+    try {
+        let payload = null;
+        if (memoryDayPayloads[dateStr]) {
+            payload = memoryDayPayloads[dateStr];
+        } else {
+            const filePath = '/' + datasetIndex.dates[dateStr].file;
+            const res = await fetch(filePath);
+            if (!res.ok) throw new Error(`Não foi possível ler ${filePath}`);
+            payload = await res.json();
+        }
+
+        activeDayPayload = payload;
+        currentLoadedDate = dateStr;
+        if (selectDateSession) selectDateSession.value = dateStr;
+
+        setProgress(60);
+        applyDayPayload(payload);
+        setProgress(100);
+        setActiveStatus(`Data ${formatDateBR(dateStr)} carregada`);
+        hideProgress();
+        if (btnExportJson) btnExportJson.style.display = 'inline-flex';
+    } catch (err) {
+        setErrorStatus(err.message);
+        hideProgress();
+    }
+}
+
+// Aplica os dados estruturados no estado da aplicação
+function applyDayPayload(payload) {
+    // 1. Limpeza de camadas anteriores
+    if (markers.logLayerGroup && maps.log) maps.log.removeLayer(markers.logLayerGroup);
+    if (markers.wifiLayerGroup && maps.wifi) maps.wifi.removeLayer(markers.wifiLayerGroup);
+    if (markers.btLayerGroup && maps.bt) maps.bt.removeLayer(markers.btLayerGroup);
+    logMarkers = [];
+
+    // 2. Mapear telemetria GPS
+    logData = [];
+    if (payload.log && Array.isArray(payload.log)) {
+        logData = payload.log.map(pt => ({
+            data_hora: pt.t.replace('T', ' '),
+            latitude: pt.lat,
+            longitude: pt.lon,
+            sat: pt.sat,
+            hdop: pt.hdop,
+            kmh: pt.kmh,
+            direcao: pt.dir,
+            umidade: pt.umid,
+            temp_dht: pt.temp,
+            ac_x: pt.ac ? pt.ac[0] : 0,
+            ac_y: pt.ac ? pt.ac[1] : 0,
+            ac_z: pt.ac ? pt.ac[2] : 0,
+            gy_x: pt.gy ? pt.gy[0] : 0,
+            gy_y: pt.gy ? pt.gy[1] : 0,
+            gy_z: pt.gy ? pt.gy[2] : 0
+        }));
+    }
+
+    // 3. Mapear Wi-Fi
+    wifiData = [];
+    if (payload.wifi && Array.isArray(payload.wifi)) {
+        wifiData = payload.wifi.map(w => ({
+            data_hora: w.t.replace('T', ' '),
+            latitude: w.lat,
+            longitude: w.lon,
+            ssid: w.ssid || '[SSID Oculto]',
+            potencia: w.rssi,
+            canal: w.ch || 1,
+            seguranca: w.auth || ''
+        }));
+    }
+
+    // 4. Mapear Bluetooth
+    btData = [];
+    if (payload.ble && Array.isArray(payload.ble)) {
+        btData = payload.ble.map(b => ({
+            data_hora: b.t.replace('T', ' '),
+            latitude: b.lat,
+            longitude: b.lon,
+            mac: b.mac,
+            nome: b.name || '',
+            rssi: b.rssi,
+            canal: b.ch !== undefined ? b.ch : null,
+            hasName: !!(b.name && b.name.trim().length > 0)
+        }));
+    }
+
+    // Renderizar Log
+    if (logData.length > 0) {
+        if (!maps.log) {
+            maps.log = initLeafletMap('map-log');
+            canvasRenderer = L.canvas({ padding: 0.5 });
+        }
+        markers.logLayerGroup = L.layerGroup().addTo(maps.log);
+        logData.forEach((pt, idx) => {
+            const marker = L.circleMarker([pt.latitude, pt.longitude], {
+                renderer: canvasRenderer,
+                radius: 3,
+                color: '#10b981',
+                fillColor: '#10b981',
+                fillOpacity: 0.7,
+                weight: 0
+            });
+            marker.on('click', () => openPointPopup(marker, pt, idx));
+            marker.addTo(markers.logLayerGroup);
+            logMarkers.push(marker);
+        });
+        finalizeLogDashboard();
+    } else {
+        imuEvents = [];
+        thresholds = { leve: 0, forte: 0, gyro: 0 };
+        updateStatCards();
+        if (charts.temp) { charts.temp.destroy(); charts.temp = null; }
+        if (charts.hum) { charts.hum.destroy(); charts.hum = null; }
+        if (charts.speed) { charts.speed.destroy(); charts.speed = null; }
+        if (charts.jerk) { charts.jerk.destroy(); charts.jerk = null; }
+        const heatbarCanvas = document.getElementById('chart-heatbar');
+        if (heatbarCanvas) {
+            const ctx = heatbarCanvas.getContext('2d');
+            ctx.clearRect(0, 0, heatbarCanvas.width, heatbarCanvas.height);
+        }
+        const heatbarLabels = document.getElementById('heatbar-labels');
+        if (heatbarLabels) heatbarLabels.innerHTML = '';
+        document.getElementById('imu-count-leve').innerText = '0';
+        document.getElementById('imu-count-forte').innerText = '0';
+        document.getElementById('imu-count-curva').innerText = '0';
+        document.getElementById('imu-thresh-leve').innerText = '—';
+        document.getElementById('imu-thresh-forte').innerText = '—';
+        document.getElementById('log-stat-bumps').innerText = '0';
+        const imuList = document.getElementById('event-list');
+        if (imuList) imuList.innerHTML = '<div style="color:var(--text-muted);padding:1rem;">Nenhum ponto GPS/IMU registrado para esta seleção.</div>';
+    }
+
+    // Renderizar Wi-Fi
+    initializeWifiDashboard();
+
+    // Renderizar Bluetooth
+    initializeBluetoothDashboard();
+}
+
+// Evento ao trocar a data no dropdown
+if (selectDateSession) {
+    selectDateSession.addEventListener('change', (e) => {
+        const selected = e.target.value;
+        if (selected) {
+            loadDateData(selected);
+        }
+    });
+}
+
+// Exportar JSON do dia selecionado ou consolidado
+if (btnExportJson) {
+    btnExportJson.addEventListener('click', () => {
+        if (!activeDayPayload) {
+            alert('Nenhum dado ativo para exportar.');
+            return;
+        }
+        const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(activeDayPayload, null, 2));
+        const downloadAnchor = document.createElement('a');
+        downloadAnchor.setAttribute('href', dataStr);
+        downloadAnchor.setAttribute('download', `${currentLoadedDate || 'tracker_export'}.json`);
+        document.body.appendChild(downloadAnchor);
+        downloadAnchor.click();
+        downloadAnchor.remove();
+    });
+}
+
+// Ingestão unificada de novos arquivos (.txt, .csv ou .json)
+if (inputBatchFiles) {
+    inputBatchFiles.addEventListener('change', async (e) => {
+        const files = Array.from(e.target.files);
+        if (files.length === 0) return;
+
+        setLoadingStatus(`Ingerindo ${files.length} arquivo(s)...`);
+        setProgress(0);
+
+        const dailyStore = {};
+        const getBucket = (d) => {
+            if (!dailyStore[d]) dailyStore[d] = { log: [], wifi: [], ble: [] };
+            return dailyStore[d];
+        };
+
+        for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+            const text = await file.text();
+
+            if (file.name.endsWith('.json')) {
+                try {
+                    const jsonPayload = JSON.parse(text);
+                    if (jsonPayload.date && (jsonPayload.log || jsonPayload.wifi || jsonPayload.ble)) {
+                        const bucket = getBucket(jsonPayload.date);
+                        if (jsonPayload.log) bucket.log.push(...jsonPayload.log);
+                        if (jsonPayload.wifi) bucket.wifi.push(...jsonPayload.wifi);
+                        if (jsonPayload.ble) bucket.ble.push(...jsonPayload.ble);
+                    }
+                } catch (err) {
+                    console.warn(`Erro no parse JSON de ${file.name}:`, err);
+                }
+            } else {
+                parseTextFileToDailyStore(file.name, text, dailyStore);
+            }
+            setProgress(((i + 1) / files.length) * 100);
+        }
+
+        const ingestedDates = Object.keys(dailyStore).sort();
+        if (ingestedDates.length === 0) {
+            setErrorStatus('Nenhum registro válido detectado nos arquivos.');
+            hideProgress();
+            return;
+        }
+
+        if (!datasetIndex) datasetIndex = { generated_at: new Date().toISOString(), dates: {} };
+
+        for (const dateStr of ingestedDates) {
+            const b = dailyStore[dateStr];
+
+            // Merge com dados já existentes para o dia (memória ou disco)
+            let existing = memoryDayPayloads[dateStr] || null;
+            if (!existing && datasetIndex.dates[dateStr]) {
+                try {
+                    const res = await fetch('/' + datasetIndex.dates[dateStr].file);
+                    if (res.ok) existing = await res.json();
+                } catch (_) { /* arquivo ainda não existe — segue sem merge */ }
+            }
+            if (existing) {
+                if (Array.isArray(existing.log))  b.log.push(...existing.log);
+                if (Array.isArray(existing.wifi)) b.wifi.push(...existing.wifi);
+                if (Array.isArray(existing.ble))  b.ble.push(...existing.ble);
+            }
+
+            const uniqueLogs = Array.from(new Map(b.log.map(item => [`${item.t}_${item.lat}_${item.lon}`, item])).values());
+            const uniqueWifis = Array.from(new Map(b.wifi.map(item => [`${item.t}_${item.lat}_${item.lon}_${item.ssid}`, item])).values());
+            const uniqueBles = Array.from(new Map(b.ble.map(item => [`${item.t}_${item.lat}_${item.lon}_${item.mac}`, item])).values());
+
+            const lats = uniqueLogs.map(l => l.lat).filter(v => v !== 0);
+            const lons = uniqueLogs.map(l => l.lon).filter(v => v !== 0);
+            const bounds = lats.length ? [[Math.min(...lats), Math.min(...lons)], [Math.max(...lats), Math.max(...lons)]] : null;
+
+            datasetIndex.dates[dateStr] = {
+                file: `data/${dateStr}.json`,
+                log_count: uniqueLogs.length,
+                wifi_count: uniqueWifis.length,
+                ble_count: uniqueBles.length,
+                unique_ssids: new Set(uniqueWifis.map(w => w.ssid)).size,
+                unique_macs: new Set(uniqueBles.map(b => b.mac)).size,
+                bounds
+            };
+
+            activeDayPayload = {
+                date: dateStr,
+                summary: datasetIndex.dates[dateStr],
+                log: uniqueLogs,
+                wifi: uniqueWifis,
+                ble: uniqueBles
+            };
+            memoryDayPayloads[dateStr] = activeDayPayload;
+        }
+
+        const mostRecent = ingestedDates[ingestedDates.length - 1];
+        populateDateSelector(mostRecent);
+        await loadDateData(mostRecent);
+        setActiveStatus(`Ingestão concluída (${ingestedDates.length} dias processados)`);
+        hideProgress();
+        if (btnExportJson) btnExportJson.style.display = 'inline-flex';
+    });
+}
+
+function parseTextFileToDailyStore(filename, text, dailyStore) {
+    const lines = text.split('\n');
+    let ftype = 'unknown';
+    const lowerName = filename.toLowerCase();
+    if (lowerName.includes('ble') || lowerName.includes('bt')) ftype = 'ble';
+    else if (lowerName.includes('wifi') || lowerName.includes('ifi')) ftype = 'wifi';
+    else if (lowerName.includes('log')) ftype = 'log';
+
+    for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line || line.startsWith('#') || line.startsWith('data_hora')) continue;
+        const parts = line.split(',');
+
+        if (ftype === 'unknown') {
+            if (parts.length >= 14) ftype = 'log';
+            else if (parts.length === 7 && parts[3].includes(':')) ftype = 'ble';
+            else if (parts.length >= 5) ftype = 'wifi';
+        }
+
+        const dateMatch = line.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2}):(\d{2})/);
+        if (!dateMatch) continue;
+        const [_, d, m, y, hh, mm, ss] = dateMatch;
+        const yr = parseInt(y);
+        if (yr < 2020 || yr > 2035) continue;
+
+        const isoDate = `${y}-${m}-${d}`;
+        const isoTime = `${y}-${m}-${d}T${hh}:${mm}:${ss}`;
+        if (!dailyStore[isoDate]) dailyStore[isoDate] = { log: [], wifi: [], ble: [] };
+
+        const latRaw = parseFloat(parts[1]);
+        const lonRaw = parseFloat(parts[2]);
+        const lat = Math.abs(latRaw) > 180 ? +(latRaw / 1000000).toFixed(6) : +latRaw.toFixed(6);
+        const lon = Math.abs(lonRaw) > 180 ? +(lonRaw / 1000000).toFixed(6) : +lonRaw.toFixed(6);
+
+        if (ftype === 'log' && parts.length >= 14) {
+            dailyStore[isoDate].log.push({
+                t: isoTime,
+                lat, lon,
+                sat: parseInt(parts[3]) || 0,
+                hdop: parseFloat(parts[4]) || 0,
+                kmh: parseFloat(parts[5]) || 0,
+                dir: parts[6] ? parts[6].trim() : '',
+                umid: parseFloat(parts[7]) || 0,
+                temp: parseFloat(parts[8]) || 0,
+                ac: [parseFloat(parts[9])||0, parseFloat(parts[10])||0, parseFloat(parts[11])||0],
+                gy: [parseFloat(parts[12])||0, parseFloat(parts[13])||0, parseFloat(parts[14]||0)||0]
+            });
+        } else if (ftype === 'wifi' && parts.length >= 5) {
+            dailyStore[isoDate].wifi.push({
+                t: isoTime,
+                lat, lon,
+                ssid: parts[3] ? parts[3].trim() : '[SSID Oculto]',
+                rssi: parseInt(parts[4]) || -100,
+                ch: parts[5] ? parseInt(parts[5]) : 1,
+                auth: parts[6] ? parts[6].trim() : ''
+            });
+        } else if (ftype === 'ble' && parts.length >= 6) {
+            dailyStore[isoDate].ble.push({
+                t: isoTime,
+                lat, lon,
+                mac: parts[3] ? parts[3].trim().toLowerCase() : '',
+                name: parts[4] ? parts[4].trim() : '',
+                rssi: parseInt(parts[5]) || -99,
+                ch: parts[6] ? parseInt(parts[6]) : null
+            });
+        }
+    }
+}
+
+// Inicializar na carga da página
+document.addEventListener('DOMContentLoaded', () => {
+    initDatasetIndex();
+});
+
 

@@ -1,0 +1,149 @@
+{
+  "generated_at": "2026-09-20T23:11:57.500214+00:00",
+  "dates": {
+    "2026-07-18": {
+      "file": "data/2026-07-18.json",
+      "log_count": 0,
+      "wifi_count": 2689,
+      "ble_count": 0,
+      "unique_ssids": 1256,
+      "unique_macs": 0,
+      "bounds": null
+    },
+    "2026-07-19": {
+      "file": "data/2026-07-19.json",
+      "log_count": 0,
+      "wifi_count": 4864,
+      "ble_count": 1340,
+      "unique_ssids": 513,
+      "unique_macs": 291,
+      "bounds": null
+    },
+    "2026-07-20": {
+      "file": "data/2026-07-20.json",
+      "log_count": 885,
+      "wifi_count": 9711,
+      "ble_count": 722,
+      "unique_ssids": 253,
+      "unique_macs": 693,
+      "bounds": [
+        [
+          -15.826685,
+          -47.987973
+        ],
+        [
+          -15.803965,
+          -47.927781
+        ]
+      ]
+    },
+    "2026-07-21": {
+      "file": "data/2026-07-21.json",
+      "log_count": 2873,
+      "wifi_count": 1023,
+      "ble_count": 747,
+      "unique_ssids": 429,
+      "unique_macs": 683,
+      "bounds": [
+        [
+          -15.846694,
+          -48.017317
+        ],
+        [
+          -15.811566,
+          -47.970262
+        ]
+      ]
+    },
+    "2026-07-22": {
+      "file": "data/2026-07-22.json",
+      "log_count": 300,
+      "wifi_count": 104,
+      "ble_count": 119,
+      "unique_ssids": 104,
+      "unique_macs": 119,
+      "bounds": [
+        [
+          -15.826673,
+          -47.991471
+        ],
+        [
+          -15.815202,
+          -47.986917
+        ]
+      ]
+    },
+    "2026-07-23": {
+      "file": "data/2026-07-23.json",
+      "log_count": 150,
+      "wifi_count": 100,
+      "ble_count": 100,
+      "unique_ssids": 100,
+      "unique_macs": 100,
+      "bounds": [
+        [
+          -15.826681,
+          -47.988636
+        ],
+        [
+          -15.814759,
+          -47.986902
+        ]
+      ]
+    },
+    "2026-07-26": {
+      "file": "data/2026-07-26.json",
+      "log_count": 600,
+      "wifi_count": 289,
+      "ble_count": 296,
+      "unique_ssids": 289,
+      "unique_macs": 296,
+      "bounds": [
+        [
+          -15.847575,
+          -47.987481
+        ],
+        [
+          -15.788807,
+          -47.836703
+        ]
+      ]
+    },
+    "2026-09-19": {
+      "file": "data/2026-09-19.json",
+      "log_count": 600,
+      "wifi_count": 389,
+      "ble_count": 397,
+      "unique_ssids": 234,
+      "unique_macs": 355,
+      "bounds": [
+        [
+          -15.826702,
+          -48.262767
+        ],
+        [
+          -15.74928,
+          -47.978374
+        ]
+      ]
+    },
+    "2026-09-20": {
+      "file": "data/2026-09-20.json",
+      "log_count": 300,
+      "wifi_count": 197,
+      "ble_count": 187,
+      "unique_ssids": 173,
+      "unique_macs": 187,
+      "bounds": [
+        [
+          -15.826723,
+          -47.987888
+        ],
+        [
+          -15.774404,
+          -47.895149
+        ]
+      ]
+    }
+  }
+}

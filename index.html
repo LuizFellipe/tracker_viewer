@@ -8,7 +8,7 @@
     
     <!-- CSS Dependencies -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=20260920">
     
     <!-- JS Dependencies -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
@@ -26,12 +26,28 @@
             <button class="tab-btn" data-tab="tab-wifi">Wi-Fi Survey</button>
             <button class="tab-btn" data-tab="tab-bt">🔵 Bluetooth</button>
         </nav>
-        <div style="display: flex; gap: 1rem; align-items: center;">
+        <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+            <!-- Seletor de Sessão / Data -->
+            <div class="session-selector-wrap" style="display: flex; align-items: center; gap: 0.5rem;">
+                <label for="select-date-session" style="font-size: 0.85rem; color: var(--text-secondary); font-weight: 500;">📅 Data:</label>
+                <select id="select-date-session" class="input-control" style="padding: 0.45rem 0.8rem; font-size: 0.85rem; min-width: 260px; max-width: 400px;">
+                    <option value="">Carregando índice...</option>
+                </select>
+            </div>
+
             <div id="status-indicator" class="status-indicator">
                 <span id="status-dot" class="dot"></span>
                 <span id="status-text">Sem dados carregados</span>
             </div>
-            <button id="btn-load-local" class="btn btn-primary">Carregar Arquivos do Workspace</button>
+
+            <!-- Ingestão de novos arquivos -->
+            <span class="file-input-wrapper btn" title="Ingerir novo log.txt, ble.txt ou wifi.txt">
+                <span>➕ Ingerir Arquivos</span>
+                <input type="file" id="input-batch-files" multiple accept=".txt,.csv,.json" />
+            </span>
+
+            <button id="btn-export-json" class="btn" title="Exportar dados do dia selecionado em JSON" style="display: none;">⬇ Exportar JSON</button>
+            <button id="btn-load-local" class="btn btn-primary">Carregar Dataset</button>
         </div>
     </header>
 

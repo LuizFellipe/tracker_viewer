@@ -28,3 +28,15 @@ Largest-Triangle-Three-Buckets — algoritmo de downsampling que reduz uma séri
 
 ### Chunk de Streaming
 Lote de ~1000 linhas do log processadas incrementalmente via `ReadableStream` do `fetch`. O mapa é atualizado progressivamente a cada chunk.
+
+### Particionamento Diário (JSON)
+Estrutura de persistência onde cada dia de gravação é consolidado em um arquivo `data/YYYY-MM-DD.json`, contendo arrays normalizados de `log` (GPS/IMU), `wifi` (SSIDs escaneados) e `ble` (beacons/dispositivos Bluetooth).
+
+### Índice do Dataset (`dataset_index.json`)
+Manifesto central gerado pelo pipeline de ingestão que lista todas as datas disponíveis, contadores de pontos (`log_count`, `wifi_count`, `ble_count`), bounding box geográfico e caminho relativo do JSON de cada dia.
+
+### Módulo de Ingestão
+Camada dupla responsável por:
+1. **CLI (`ingest.py`)**: Varredura recursiva de arquivos em `log/`, deduplicação unívoca por timestamp/coordenadas/identificador e geração da pasta `data/`.
+2. **Web (`app.js`)**: Importação em lote no navegador com capacidade de ler `.txt`, `.csv` e `.json`, permitindo inserção de novos dados dinamicamente sem reiniciar o servidor.
+

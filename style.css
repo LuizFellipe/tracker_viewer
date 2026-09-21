@@ -1,6 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
 
 :root {
+    color-scheme: dark;
     --bg-primary: #0b0f19;
     --bg-secondary: #131a2e;
     --bg-card: rgba(22, 30, 49, 0.7);
@@ -566,6 +567,7 @@ main {
 }
 
 .input-control {
+    color-scheme: dark;
     background-color: rgba(255, 255, 255, 0.05);
     border: 1px solid var(--border-color);
     color: var(--text-primary);
@@ -574,11 +576,38 @@ main {
     font-family: inherit;
     font-size: 0.95rem;
     outline: none;
-    transition: border-color 0.2s ease;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+select.input-control {
+    color-scheme: dark;
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+    cursor: pointer;
 }
 
 .input-control:focus {
     border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
+.input-control option,
+select.input-control option {
+    background-color: var(--bg-secondary);
+    color: var(--text-primary);
+    padding: 0.5rem 0.75rem;
+}
+
+.input-control optgroup,
+select.input-control optgroup {
+    background-color: var(--bg-primary);
+    color: var(--text-secondary);
+}
+
+.input-control option:checked,
+select.input-control option:checked {
+    background-color: var(--accent);
+    color: #ffffff;
 }
 
 .list-panel {
